@@ -66,7 +66,8 @@ generateBtn.addEventListener("click", async () => {
     setStatus(`Extracted ${rows.length} draft picks (${pickCount} picks × 15 rounds). Creating the matrix…`);
     const { blob, managers } = await renderMatrix(rows, {
       scale: Number(scaleSelect.value),
-      theme: themeSelect.value
+      theme: themeSelect.value,
+      pickCount
     });
 
     currentBlob = blob;
@@ -265,8 +266,10 @@ async function renderMatrix(rows, options) {
     .map(x => x.manager);
 
   const uniqueManagers = [...new Set(managers)];
-  if (uniqueManagers.length !== 12) {
-    throw new Error(`Expected 12 manager codes, found ${uniqueManagers.length}.`);
+  const pickCount = options.pickCount;
+
+  if (uniqueManagers.length !== pickCount) {
+    throw new Error(`Detected ${pickCount} picks per round, but found ${uniqueManagers.length} manager codes in Round 1.`);
   }
 
   const width = Math.max(2200, 150 + pickCount * 215);

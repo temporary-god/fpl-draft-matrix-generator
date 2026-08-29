@@ -61,9 +61,9 @@ generateBtn.addEventListener("click", async () => {
 
   try {
     const rows = await extractDraftRows(selectedFile);
-    validateRows(rows);
+    const pickCount = validateRows(rows);
 
-    setStatus(`Extracted ${rows.length} draft picks. Creating the matrix…`);
+    setStatus(`Extracted ${rows.length} draft picks (${pickCount} picks × 15 rounds). Creating the matrix…`);
     const { blob, managers } = await renderMatrix(rows, {
       scale: Number(scaleSelect.value),
       theme: themeSelect.value
@@ -170,7 +170,7 @@ async function extractDraftRows(file) {
       const manager = normalizeText(managerItem.str);
 
       if (!Number.isInteger(round) || round < 1 || round > 15) continue;
-      if (!Number.isInteger(pick) || pick < 1 || pick > 12) continue;
+      if (!Number.isInteger(pick) || pick < 1 || pick > 16) continue;
       if (!/^[A-Za-z]{2,4}$/.test(manager)) continue;
 
       // Player name sits slightly above the Round/Pick/Manager baseline.
@@ -220,25 +220,42 @@ function nearest(items, targetX, tolerance) {
 }
 
 function validateRows(rows) {
-  if (rows.length < 100) {
+  if (rows.length < 30) {
     throw new Error(
       `Only ${rows.length} draft rows were detected. This does not look like the expected Draft Room PDF format.`
     );
   }
 
-  const expected = 15 * 12;
-  if (rows.length !== expected) {
-    throw new Error(
-      `Detected ${rows.length} picks, but the expected format contains ${expected} picks (15 rounds × 12).`
-    );
+  // There are always 15 rounds, but each round can contain 2–16 picks.
+  const counts = [];
+  for (let round = 1; round <= 15; round++) {
+    const picks = rows.filter(x => x.round === round);
+    if (!picks.length) throw new Error(`Round ${round} was not detected.`);
+    const numbers = [...new Set(picks.map(x => x.pick))].sort((a, b) => a - b);
+    counts.push(numbers.length);
+  }
+
+  const pickCount = counts[0];
+  if (pickCount < 2 || pickCount > 16) {
+    throw new Error(`Detected ${pickCount} picks per round. Supported range is 2–16.`);
   }
 
   for (let round = 1; round <= 15; round++) {
     const picks = rows.filter(x => x.round === round);
-    if (picks.length !== 12) {
-      throw new Error(`Round ${round} has ${picks.length} detected picks instead of 12.`);
+    if (picks.length !== pickCount) {
+      throw new Error(`Round ${round} has ${picks.length} picks, but Round 1 has ${pickCount}. Every round must have the same number of picks.`);
+    }
+    const numbers = [...new Set(picks.map(x => x.pick))].sort((a, b) => a - b);
+    for (let i = 0; i < pickCount; i++) {
+      if (numbers[i] !== i + 1) throw new Error(`Round ${round} is missing pick ${i + 1}.`);
     }
   }
+
+  const expected = 15 * pickCount;
+  if (rows.length !== expected) {
+    throw new Error(`Detected ${rows.length} picks, but expected ${expected} (15 rounds × ${pickCount}).`);
+  }
+  return pickCount;
 }
 
 async function renderMatrix(rows, options) {
@@ -252,7 +269,7 @@ async function renderMatrix(rows, options) {
     throw new Error(`Expected 12 manager codes, found ${uniqueManagers.length}.`);
   }
 
-  const width = 3000;
+  const width = Math.max(2200, 150 + pickCount * 215);
   const height = 1740;
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(width * options.scale);
@@ -279,13 +296,13 @@ async function renderMatrix(rows, options) {
 
   ctx.fillStyle = muted;
   ctx.font = "600 19px Inter, Arial, sans-serif";
-  ctx.fillText("FPL DRAFT MATRIX • 15 ROUNDS • 12 MANAGERS", width / 2, 88);
+  ctx.fillText(`FPL DRAFT MATRIX • 15 ROUNDS • ${pickCount} MANAGERS`, width / 2, 88);
 
   const marginX = 32;
   const top = 120;
   const tableW = width - marginX * 2;
   const roundW = 115;
-  const colW = (tableW - roundW) / 12;
+  const colW = (tableW - roundW) / pickCount;
   const headerH = 68;
   const rowH = 94;
 
@@ -319,7 +336,7 @@ async function renderMatrix(rows, options) {
     ctx.font = "800 23px Inter, Arial, sans-serif";
     ctx.fillText(String(round), marginX + roundW / 2, y + rowH / 2 + 8);
 
-    for (let pick = 1; pick <= 12; pick++) {
+    for (let pick = 1; pick <= pickCount; pick++) {
       const x = marginX + roundW + (pick - 1) * colW;
       const row = byKey.get(`${round}-${pick}`);
 
@@ -334,7 +351,7 @@ async function renderMatrix(rows, options) {
 
   ctx.strokeStyle = line;
   ctx.lineWidth = 1;
-  for (let i = 0; i <= 12; i++) {
+  for (let i = 0; i <= pickCount; i++) {
     const x = marginX + roundW + i * colW;
     ctx.beginPath();
     ctx.moveTo(x, top);
